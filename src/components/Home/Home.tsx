@@ -32,11 +32,11 @@ export const Home = () => {
           image={"/screenshot4.png"}
         />
         <div className={styles.featureSection}>
-          <Feature
+          {/* <Feature
             Icon={IconBrowser}
             title={`VBrowser`}
             text="Watch together on a virtual browser running in the cloud."
-          />
+          /> */}
           <Feature
             Icon={IconBrandYoutubeFilled}
             title={`YouTube`}

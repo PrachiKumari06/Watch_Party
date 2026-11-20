@@ -5,7 +5,6 @@ import { Hetzner } from "./hetzner.ts";
 import { DigitalOcean } from "./digitalocean.ts";
 import { Docker } from "./docker.ts";
 
-// Chromium on ARM: ghcr.io/howardchung/vbrowser/arm-chromium
 export const imageName = "howardc93/vbrowser";
 
 export type PoolRegion = "US" | "USW" | "EU";

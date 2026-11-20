@@ -25,3 +25,5 @@ yarn-error.log*
 
 .theia
 .eslintcache
+
+postgresql-19.0-1-windows-x64.exe
