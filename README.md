@@ -2,7 +2,7 @@
 
 WatchParty lets people watch videos together in shared rooms. Room members can synchronize playback, chat, and manage a shared playlist in real time.
 
-**Live app:** [https://www.watchparty.me](https://www.watchparty.me)
+**Live app:** [https://watch-party-khaki-eight.vercel.app/](https://watch-party-khaki-eight.vercel.app/)
 
 ## Setup and run
 
@@ -40,7 +40,7 @@ PORT=8080
 HOST=0.0.0.0
 ```
 
-PostgreSQL and Redis are optional for a basic local session. Set `DATABASE_URL` and `REDIS_URL` to enable database-backed room persistence and Redis-backed features. Initialize PostgreSQL with `sql/schema.sql` before using it. Other optional integrations include YouTube search (`YOUTUBE_API_KEY`), Firebase authentication (`FIREBASE_ADMIN_SDK_CONFIG`), and Stripe subscriptions (`STRIPE_SECRET_KEY`).
+PostgreSQL and Redis are optional for a basic local session. Set `DATABASE_URL` and `REDIS_URL` to enable database-backed room persistence and Redis-backed features. Initialize PostgreSQL with `sql/schema.sql` before using it. Other optional integrations include YouTube search (`YOUTUBE_API_KEY`), Firebase authentication (`FIREBASE_ADMIN_SDK_CONFIG`), and Stripe subscriptions (`STRIPE_SECRET_KEY`) optional.
 
 ### Build and run as a single server
 
