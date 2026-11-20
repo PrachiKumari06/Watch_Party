@@ -52,8 +52,11 @@ export async function createRoom(
     }
   } catch (error) {
     console.error("Failed to create room:", error);
+
     window.alert(
-      "Failed to create room. Please ensure the backend server is running on port 8080 (npm run dev)."
+      error instanceof Error
+        ? `Failed to create room: ${error.message}`
+        : "Failed to create room. Check the browser console."
     );
   }
 }
