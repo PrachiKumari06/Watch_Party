@@ -366,6 +366,11 @@ app.post("/createRoom", async (req, res) => {
 
   console.log("createRoom:", name);
 
+  const newRoom = new Room(io, name);
+  rooms.set(name, newRoom);
+
+  res.json({ name: name.slice(1) });
+
   
 });
 
