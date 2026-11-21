@@ -40,7 +40,7 @@ PORT=8080
 HOST=0.0.0.0
 ```
 
-PostgreSQL and Redis are optional for a basic local session. Set `DATABASE_URL` and `REDIS_URL` to enable database-backed room persistence and Redis-backed features. Initialize PostgreSQL with `sql/schema.sql` before using it. Other optional integrations include YouTube search (`YOUTUBE_API_KEY`), Firebase authentication (`FIREBASE_ADMIN_SDK_CONFIG`), and Stripe subscriptions (`STRIPE_SECRET_KEY`) optional.
+PostgreSQL is optional for a basic local session. Set `DATABASE_URL`to enable database-backed room persistence features. Initialize PostgreSQL with `sql/schema.sql` before using it. Other optional integrations include YouTube search (`YOUTUBE_API_KEY`), Firebase authentication (`FIREBASE_ADMIN_SDK_CONFIG`).
 
 ### Build and run as a single server
 
