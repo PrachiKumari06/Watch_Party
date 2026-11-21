@@ -336,23 +336,20 @@ app.post("/createRoom", async (req, res) => {
           creationTime: now,
         });
       } catch (e) {
-        const dbError = e as { code?: string; message?: string };
+  const error = e as {
+    code?: string;
+    message?: string;
+    detail?: string;
+  };
 
-        console.error("Room creation DB error:", e);
+  console.error("ROOM INSERT FAILED:", error);
 
-        // Retry only if the generated room ID already exists
-        if (dbError.code === "23505") {
-          console.warn("Duplicate room ID, retrying:", candidate);
-          continue;
-        }
+  console.error("DB ERROR CODE:", error.code);
+  console.error("DB ERROR MESSAGE:", error.message);
+  console.error("DB ERROR DETAIL:", error.detail);
 
-        // Other database errors should not be hidden
-        res.status(500).json({
-          error: "Database error while creating room",
-          details: dbError.message,
-        });
-        return;
-      }
+  continue;
+}
     }
 
     name = candidate;
