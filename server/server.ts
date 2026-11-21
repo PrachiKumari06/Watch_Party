@@ -315,16 +315,20 @@ app.get("/youtubePlaylist/:playlistId", async (req, res) => {
   }
 });
 
+
 app.post("/createRoom", async (req, res) => {
-  // Pick a name nobody else is using. Collisions in memory or in the DB just retry.
   let name = "";
+
   for (let attempt = 0; attempt < 5 && !name; attempt++) {
     const candidate = "/" + makeRoomName(config.SHARD);
+
     if (rooms.has(candidate)) {
       continue;
     }
+
     if (postgres) {
       const now = new Date();
+
       try {
         await insertObject(postgres, "room", {
           roomId: candidate,
@@ -332,62 +336,40 @@ app.post("/createRoom", async (req, res) => {
           creationTime: now,
         });
       } catch (e) {
-        console.error(e);
-        redisCount("createRoomError");
-        continue;
+        const dbError = e as { code?: string; message?: string };
+
+        console.error("Room creation DB error:", e);
+
+        // Retry only if the generated room ID already exists
+        if (dbError.code === "23505") {
+          console.warn("Duplicate room ID, retrying:", candidate);
+          continue;
+        }
+
+        // Other database errors should not be hidden
+        res.status(500).json({
+          error: "Database error while creating room",
+          details: dbError.message,
+        });
+        return;
       }
     }
+
     name = candidate;
   }
+
   if (!name) {
-    res.status(503).json({ error: "could not allocate a room name" });
+    console.error("Failed to allocate room after 5 attempts");
+
+    res.status(503).json({
+      error: "Could not allocate a unique room name",
+    });
     return;
   }
-  console.log("createRoom: ", name);
-  // Only construct the Room once the name is secured, since it registers a namespace and a timer
-  const newRoom = new Room(io, name);
-  rooms.set(name, newRoom);
-  try {
-    const decoded = await validateUserToken(req.body?.uid, req.body?.token);
-    newRoom.creator = decoded?.email;
-    const preload =
-      typeof req.body?.video === "string" ? req.body.video.slice(0, 20000) : "";
-    if (preload) {
-      redisCount("createRoomPreload");
-      newRoom.video = preload;
-      newRoom.paused = true;
-      await newRoom.saveRoom();
-    }
-    // Only accept reasonably sized strings, cap the number of items
-    const prePlaylist: string[] = Array.isArray(req.body?.playlist)
-      ? req.body.playlist
-          .filter(
-            (item: unknown): item is string =>
-              typeof item === "string" &&
-              item.length > 0 &&
-              item.length <= 20000,
-          )
-          .slice(0, 25)
-      : [];
-    if (prePlaylist.length) {
-      // Add in order in the background, a failing item shouldn't affect the others or the request
-      (async () => {
-        for (const item of prePlaylist) {
-          try {
-            await newRoom.playlistAdd(null, item);
-          } catch (e) {
-            console.warn(e);
-          }
-        }
-      })();
-    }
-  } catch (e) {
-    // Don't leave a half-created room (and its timer/namespace) behind
-    newRoom.destroy();
-    rooms.delete(name);
-    throw e;
-  }
-  res.json({ name });
+
+  console.log("createRoom:", name);
+
+  
 });
 
 app.post("/checkoutSub", async (req, res) => {
