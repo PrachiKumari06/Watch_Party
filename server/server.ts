@@ -322,9 +322,14 @@ app.post("/createRoom", async (req, res) => {
     console.log("createRoom:", name);
 
   const newRoom = new Room(io, name);
+  // The creator becomes the host. The secret is returned once, only to the creator,
+  // and only its hash is stored on the server.
+  const hostKey = newRoom.initHost();
   rooms.set(name, newRoom);
+  // Persist right away so the host survives a server restart before the first autosave
+  await newRoom.saveRoom();
 
-  res.json({ name });
+  res.json({ name, hostKey });
 
   
 });

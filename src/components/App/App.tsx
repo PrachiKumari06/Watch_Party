@@ -82,6 +82,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { InviteButton } from "../InviteButton/InviteButton";
+import { RoomMembers, type ChangeRequest } from "../RoomMembers/RoomMembers";
 import type WebTorrent from "webtorrent";
 import type Hls from "hls.js";
 import { type MediaPlayerClass } from "dashjs";
@@ -163,6 +164,7 @@ interface AppState {
   isSubtitleModalOpen: boolean;
   isMultiSelectModalOpen: boolean;
   roomLock: string;
+  requests: ChangeRequest[];
   controller?: string;
   savedPasswords: StringDict;
   roomId: string;
@@ -238,6 +240,7 @@ export class App extends React.Component<AppProps, AppState> {
     isSubtitleModalOpen: false,
     isMultiSelectModalOpen: false,
     roomLock: "",
+    requests: [],
     controller: "",
     roomId: "",
     savedPasswords: {},
@@ -361,6 +364,7 @@ export class App extends React.Component<AppProps, AppState> {
       query: {
         clientId,
         password,
+        roleKey: window.localStorage.getItem("watchparty-rolekey:" + roomId) ?? "",
         shard,
         roomId: roomId.slice(1),
       },
@@ -417,6 +421,31 @@ export class App extends React.Component<AppProps, AppState> {
         this.setState({ successMessage: "" });
       }, 3000);
     });
+    socket.on("REC:roleKey", (key: string) => {
+      // Server issued (or revoked) the secret for our role in this room
+      const storageKey = "watchparty-rolekey:" + roomId;
+      if (key) {
+        window.localStorage.setItem(storageKey, key);
+      } else {
+        window.localStorage.removeItem(storageKey);
+      }
+    });
+    socket.on("REC:requests", (data: ChangeRequest[]) => {
+      this.setState({ requests: data });
+    });
+    socket.on(
+      "REC:requestResult",
+      (data: { video: string; status: "pending" | "approved" | "rejected" }) => {
+        const message =
+          data.status === "pending"
+            ? "Request sent, waiting for the host or a moderator"
+            : data.status === "approved"
+              ? "Your video request was approved"
+              : "Your video request was rejected";
+        this.setState({ successMessage: message });
+        setTimeout(() => this.setState({ successMessage: "" }), 3000);
+      },
+    );
     socket.on("kicked", () => {
       window.location.assign("/");
     });
@@ -1055,7 +1084,17 @@ export class App extends React.Component<AppProps, AppState> {
     this.socket.emit("CMD:lock", { locked });
   };
 
+  // Role-based permission: only the host and moderators may control playback.
+  // The server enforces this too, this just disables the controls.
+  canControl = () => {
+    const me = this.state.participants.find((p) => p.id === clientId);
+    return me?.role === "host" || me?.role === "moderator";
+  };
+
   haveLock = () => {
+    if (!this.canControl()) {
+      return false;
+    }
     if (!this.state.roomLock) {
       return true;
     }
@@ -2821,6 +2860,13 @@ this.state.convertProgress !== undefined && (this.state.convertProgress * 100).t
                     transition: "height ease-out 0.5s",
                   }}
                 >
+                  <RoomMembers
+                    socket={this.socket}
+                    participants={this.state.participants}
+                    nameMap={this.state.nameMap}
+                    myId={clientId}
+                    requests={this.state.requests}
+                  />
                   <VideoChat
                     socket={this.socket}
                     participants={this.state.participants}

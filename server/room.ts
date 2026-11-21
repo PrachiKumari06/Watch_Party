@@ -12,6 +12,7 @@ import {
 import twitch from "twitch-m3u8";
 import { type QueryResult } from "pg";
 import { Docker } from "./vm/docker.ts";
+import crypto from "node:crypto";
 
 // Stateless pool instance to use for VMs if full management isn't needed
 let stateless: Docker | undefined = undefined;
@@ -28,6 +29,28 @@ if (!config.VM_MANAGER_CONFIG) {
 
 // Max number of vBrowsers a single user can have assigned at once
 const MAX_VBROWSERS_PER_USER = 2;
+
+export type Role = "host" | "moderator" | "participant";
+
+// A participant's request for a change they are not allowed to make directly.
+// A host/moderator has to approve it before it takes effect.
+interface ChangeRequest {
+  id: string;
+  clientId: string;
+  type: "changeVideo";
+  video: string;
+  timestamp: string;
+}
+
+const sha256 = (value: string) =>
+  crypto.createHash("sha256").update(value).digest("hex");
+const newKey = () => crypto.randomBytes(16).toString("hex");
+const safeEqual = (a: string, b: string) => {
+  const ba = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
+};
+const MAX_PENDING_REQUESTS = 20;
 
 // Extend the interface
 declare module "socket.io" {
@@ -52,8 +75,18 @@ export class Room {
   public creator: string | undefined = undefined; // email of the user who created the room (just used for stats)
   public lock: string | undefined = undefined; // uid of the user who locked the room
   public playlist: PlaylistVideo[] = [];
+  // Role-based access control (serialized). Only hashes of secret keys are stored.
+  // hostKeyHash: sha256 of the secret the room creator received from /createRoom
+  // hostId: clientId currently acting as host (bound when the host key is presented)
+  // modKeyHashes: clientId -> sha256 of the secret issued to that moderator
+  public hostKeyHash: string | undefined = undefined;
+  public hostId: string | undefined = undefined;
+  private modKeyHashes: StringDict = {};
 
   // Non-serialized state
+  private pendingRequests: ChangeRequest[] = [];
+  private bannedIds = new Set<string>(); // clientIds removed by the host
+  private pendingKeys: StringDict = {}; // keys to deliver to a client on connect
   public roomId: string;
   public roster: User[] = [];
   private lastTsMap = Date.now();
@@ -150,6 +183,18 @@ export class Room {
           next(new Error("Invalid clientId format"));
           return;
         }
+        if (this.bannedIds.has(clientId)) {
+          next(new Error("You were removed from this room by the host"));
+          return;
+        }
+        // Verify the role key first. Roles are keyed by clientId, which is visible to
+        // everyone in the roster, so without the key a user could impersonate the host
+        // (and would also disconnect the real host just by reusing their clientId).
+        const roleKey = socket.handshake.query?.roleKey;
+        if (!this.verifyRole(clientId, typeof roleKey === "string" ? roleKey : "")) {
+          next(new Error("Invalid role key"));
+          return;
+        }
         // Disconnect other sockets with this clientId
         if (this.socketIdMap[clientId]) {
           io.of(roomId).sockets.get(this.socketIdMap[clientId])?.disconnect();
@@ -187,6 +232,16 @@ export class Room {
 
       socket.clientId = clientId;
       socket.uid = "";
+
+      // Keys are only ever sent to the client they belong to
+      const freshKey = this.pendingKeys[clientId];
+      if (freshKey) {
+        socket.emit("REC:roleKey", freshKey);
+        delete this.pendingKeys[clientId];
+      }
+      if (this.canControl(clientId)) {
+        socket.emit("REC:requests", this.pendingRequests);
+      }
 
       // Check if this socket matches this.lock UID
       const validateLock = () => {
@@ -233,24 +288,57 @@ export class Room {
           socket.uid = decoded?.uid;
         }
       });
-      on("CMD:host", (data: unknown) => {
-        validateLock() && this.startHosting(socket, String(data));
-      });
-      on("CMD:play", () => {
-        validateLock() && this.playVideo(socket);
-      });
-      on("CMD:pause", () => {
-        validateLock() && this.pauseVideo(socket);
-      });
-      on("CMD:seek", (data: unknown) => {
-        validateLock() && this.seekVideo(socket, data);
-      });
-      on("CMD:playbackRate", (data: unknown) => {
-        validateLock() && this.setPlaybackRate(socket, data);
-      });
-      on("CMD:loop", (data: unknown) => {
-        validateLock() && this.setLoop(data);
-      });
+      // Playback permissions: only the host and moderators may control the room.
+      // Everything is validated here on the server, the UI only mirrors it.
+      const control = (action: string, fn: () => unknown) => {
+        if (!this.canControl(socket.clientId)) {
+          socket.emit(
+            "errorMessage",
+            `Only the host or a moderator can ${action}.`,
+          );
+          return;
+        }
+        if (!validateLock()) {
+          return;
+        }
+        return fn();
+      };
+      const hostOnly = (action: string, fn: () => unknown) => {
+        if (this.getRole(socket.clientId) !== "host") {
+          socket.emit("errorMessage", `Only the host can ${action}.`);
+          return;
+        }
+        return fn();
+      };
+
+      on("CMD:host", (data: unknown) =>
+        control("change the video", () => this.startHosting(socket, String(data))),
+      );
+      on("CMD:play", () => control("play", () => this.playVideo(socket)));
+      on("CMD:pause", () => control("pause", () => this.pauseVideo(socket)));
+      on("CMD:seek", (data: unknown) =>
+        control("seek", () => this.seekVideo(socket, data)),
+      );
+      on("CMD:playbackRate", (data: unknown) =>
+        control("change the speed", () => this.setPlaybackRate(socket, data)),
+      );
+      on("CMD:loop", (data: unknown) =>
+        control("change looping", () => this.setLoop(data)),
+      );
+      // Role management
+      on("CMD:assignRole", (data: unknown) =>
+        hostOnly("assign roles", () => this.assignRole(socket, data)),
+      );
+      on("CMD:transferHost", (data: unknown) =>
+        hostOnly("transfer host", () => this.transferHost(socket, data)),
+      );
+      // Participants ask, host/moderators approve
+      on("CMD:requestChange", (data: unknown) =>
+        this.requestChange(socket, data),
+      );
+      on("CMD:resolveRequest", (data: unknown) =>
+        control("approve requests", () => this.resolveRequest(socket, data)),
+      );
       on("CMD:ts", (data: unknown) => this.setTimestamp(socket, data));
       on("CMD:chat", (data: unknown) =>
         this.sendChatMessage(socket, String(data)),
@@ -276,9 +364,9 @@ export class Room {
       on("CMD:changeController", (data: unknown) => {
         validateLock() && this.changeController(String(data));
       });
-      on("CMD:subtitle", (data: unknown) => {
-        validateLock() && this.addSubtitles(String(data));
-      });
+      on("CMD:subtitle", (data: unknown) =>
+        control("change subtitles", () => this.addSubtitles(String(data))),
+      );
       on("CMD:lock", async (data: unknown) => {
         const hasLock = validateLock();
         const isOwner = await validateOwner();
@@ -294,24 +382,26 @@ export class Room {
       on("CMD:setRoomOwner", async (data: unknown) => {
         (await validateOwner()) && this.setRoomOwner(socket, data);
       });
-      on("CMD:playlistNext", (data: unknown) => {
-        validateLock() && this.playlistNext(data);
-      });
-      on("CMD:playlistAdd", (data: unknown) => {
-        validateLock() && this.playlistAdd(socket, String(data));
-      });
-      on("CMD:playlistMove", (data: unknown) => {
-        validateLock() && this.playlistMove(data);
-      });
-      on("CMD:playlistDelete", (data: unknown) => {
-        validateLock() && this.playlistDelete(data);
-      });
-      on("CMD:kickUser", async (data: unknown) => {
-        (await validateOwner()) && this.kickUser(data);
-      });
-      on("CMD:deleteChatMessages", async (data: unknown) => {
-        (await validateOwner()) && this.deleteChatMessages(data);
-      });
+      on("CMD:playlistNext", (data: unknown) =>
+        control("skip videos", () => this.playlistNext(data)),
+      );
+      on("CMD:playlistAdd", (data: unknown) =>
+        control("edit the playlist", () =>
+          this.playlistAdd(socket, String(data)),
+        ),
+      );
+      on("CMD:playlistMove", (data: unknown) =>
+        control("edit the playlist", () => this.playlistMove(data)),
+      );
+      on("CMD:playlistDelete", (data: unknown) =>
+        control("edit the playlist", () => this.playlistDelete(data)),
+      );
+      on("CMD:kickUser", (data: unknown) =>
+        hostOnly("remove participants", () => this.kickUser(socket, data)),
+      );
+      on("CMD:deleteChatMessages", (data: unknown) =>
+        control("delete chat messages", () => this.deleteChatMessages(data)),
+      );
 
       on("signal", (data: unknown) => this.sendSignal(socket, data, "signal"));
       on("signalSS", (data: unknown) =>
@@ -352,6 +442,9 @@ export class Room {
       creator: this.creator,
       playlist: this.playlist,
       loop: this.loop,
+      hostKeyHash: this.hostKeyHash,
+      hostId: this.hostId,
+      modKeyHashes: this.modKeyHashes,
     });
   };
 
@@ -391,6 +484,15 @@ export class Room {
     }
     if (roomObj.loop) {
       this.loop = roomObj.loop;
+    }
+    if (roomObj.hostKeyHash) {
+      this.hostKeyHash = roomObj.hostKeyHash;
+    }
+    if (roomObj.hostId) {
+      this.hostId = roomObj.hostId;
+    }
+    if (roomObj.modKeyHashes) {
+      this.modKeyHashes = roomObj.modKeyHashes;
     }
   };
 
@@ -444,6 +546,7 @@ export class Room {
     return this.roster.map((p) => {
       return {
         ...p,
+        role: this.getRole(p.id),
         isScreenShare: p.id === this.getSharerId(),
       };
     });
@@ -1424,24 +1527,229 @@ export class Room {
       this.io.of(this.roomId).emit("roster", this.getRosterForApp());
       delete this.tsMap[clientId];
       delete this.socketIdMap[clientId];
+      this.dropRequestsFrom(clientId);
     }
     // Keep namemap/picturemap so old chat messages still render correctly after disconnect
     // When serializing we only write values with messages in chat
     // This will keep growing in memory until the room is unloaded
   };
 
-  private kickUser = async (raw: unknown) => {
-    const data = raw as { userToBeKicked: string };
-    if (!data) {
+  private kickUser = (socket: Socket, raw: unknown) => {
+    const data = raw as { userToBeKicked: string } | null;
+    const target = data?.userToBeKicked;
+    if (typeof target !== "string" || target === socket.clientId) {
       return;
     }
-    const userToBeKickedSocket = this.io
-      .of(this.roomId)
-      .sockets.get(this.socketIdMap[data.userToBeKicked]);
-    if (userToBeKickedSocket) {
-      userToBeKickedSocket.emit("kicked");
-      userToBeKickedSocket.disconnect();
+    // The host can't be removed (transfer host first)
+    if (target === this.hostId) {
+      return;
     }
+    // Remember the removal so the user can't just reconnect with the same clientId
+    this.bannedIds.add(target);
+    delete this.modKeyHashes[target];
+    this.dropRequestsFrom(target);
+    const targetSocket = this.io
+      .of(this.roomId)
+      .sockets.get(this.socketIdMap[target]);
+    if (targetSocket) {
+      targetSocket.emit("kicked");
+      targetSocket.disconnect();
+    }
+    this.io.of(this.roomId).emit("REC:participantRemoved", { userId: target });
+  };
+
+  // ---------------------------------------------------------------------------
+  // Role-based access control
+  // ---------------------------------------------------------------------------
+
+  // Used only for the very first claim on a legacy room that has no host yet.
+  private claimHost = (clientId: string) => {
+    const key = newKey();
+    this.hostKeyHash = sha256(key);
+    this.hostId = clientId;
+    this.pendingKeys[clientId] = key;
+  };
+
+  // Returns true if this client may join as the identity it claims. Must be called
+  // from the connection middleware before any state is touched.
+  private verifyRole = (clientId: string, roleKey: string): boolean => {
+    const keyHash = roleKey ? sha256(roleKey) : "";
+    if (this.hostKeyHash && keyHash && safeEqual(keyHash, this.hostKeyHash)) {
+      // Host key presented: this client is the host
+      if (this.hostId && this.hostId !== clientId) {
+        // Host reconnecting from a new clientId: demote nothing, just rebind
+        delete this.modKeyHashes[clientId];
+      }
+      this.hostId = clientId;
+      return true;
+    }
+    if (!this.hostKeyHash && !this.hostId) {
+      // Legacy room with no host yet: first person in becomes host
+      this.claimHost(clientId);
+      return true;
+    }
+    if (clientId === this.hostId) {
+      return false; // claims to be host without the key
+    }
+    const modHash = this.modKeyHashes[clientId];
+    if (modHash) {
+      return Boolean(keyHash) && safeEqual(keyHash, modHash);
+    }
+    return true; // ordinary participant
+  };
+
+  public getRole = (clientId: string): Role => {
+    if (clientId === this.hostId) {
+      return "host";
+    }
+    if (this.modKeyHashes[clientId]) {
+      return "moderator";
+    }
+    return "participant";
+  };
+
+  private canControl = (clientId: string) => this.getRole(clientId) !== "participant";
+
+  // Called by POST /createRoom. Returns the secret the creator must keep.
+  public initHost = (): string => {
+    const key = newKey();
+    this.hostKeyHash = sha256(key);
+    return key;
+  };
+
+  private socketFor = (clientId: string) =>
+    this.io.of(this.roomId).sockets.get(this.socketIdMap[clientId]);
+
+  private emitToControllers = (event: string, payload: unknown) => {
+    for (const user of this.roster) {
+      if (this.canControl(user.id)) {
+        this.socketFor(user.id)?.emit(event, payload);
+      }
+    }
+  };
+
+  private broadcastRoles = (userId: string, username: string) => {
+    this.io.of(this.roomId).emit("REC:roleAssigned", {
+      userId,
+      username,
+      role: this.getRole(userId),
+    });
+    this.io.of(this.roomId).emit("roster", this.getRosterForApp());
+    this.saveRoom();
+  };
+
+  private assignRole = (socket: Socket, raw: unknown) => {
+    const data = raw as { userId?: unknown; role?: unknown } | null;
+    const userId = data?.userId;
+    const role = data?.role;
+    if (typeof userId !== "string" || (role !== "moderator" && role !== "participant")) {
+      return;
+    }
+    // The host's own role can only change through transferHost
+    if (userId === this.hostId) {
+      return;
+    }
+    if (!this.roster.some((u) => u.id === userId)) {
+      return;
+    }
+    if (role === "moderator") {
+      const key = newKey();
+      this.modKeyHashes[userId] = sha256(key);
+      this.socketFor(userId)?.emit("REC:roleKey", key);
+    } else {
+      delete this.modKeyHashes[userId];
+      this.socketFor(userId)?.emit("REC:roleKey", "");
+      this.dropRequestsFrom(userId);
+    }
+    this.broadcastRoles(userId, this.nameMap[userId] || userId);
+    // Controllers' list of requests depends on who is a controller
+    this.sendRequestsToControllers();
+  };
+
+  private transferHost = (socket: Socket, raw: unknown) => {
+    const data = raw as { userId?: unknown } | null;
+    const userId = data?.userId;
+    const oldHost = socket.clientId;
+    if (typeof userId !== "string" || userId === oldHost) {
+      return;
+    }
+    if (!this.roster.some((u) => u.id === userId)) {
+      return;
+    }
+    const hostKey = newKey();
+    const modKey = newKey();
+    this.hostKeyHash = sha256(hostKey);
+    this.hostId = userId;
+    delete this.modKeyHashes[userId];
+    // Old host stays on as a moderator
+    this.modKeyHashes[oldHost] = sha256(modKey);
+    this.socketFor(userId)?.emit("REC:roleKey", hostKey);
+    this.socketFor(oldHost)?.emit("REC:roleKey", modKey);
+    this.broadcastRoles(userId, this.nameMap[userId] || userId);
+    this.sendRequestsToControllers();
+  };
+
+  private sendRequestsToControllers = () => {
+    this.emitToControllers("REC:requests", this.pendingRequests);
+  };
+
+  private dropRequestsFrom = (clientId: string) => {
+    const before = this.pendingRequests.length;
+    this.pendingRequests = this.pendingRequests.filter(
+      (r) => r.clientId !== clientId,
+    );
+    if (this.pendingRequests.length !== before) {
+      this.sendRequestsToControllers();
+    }
+  };
+
+  private requestChange = (socket: Socket, raw: unknown) => {
+    const data = raw as { video?: unknown } | null;
+    const video = data?.video;
+    if (typeof video !== "string" || !video || video.length > 2000) {
+      return;
+    }
+    if (this.canControl(socket.clientId)) {
+      // Controllers don't need approval, they can just change the video
+      return;
+    }
+    // At most one pending request per participant: a new one replaces the old
+    this.pendingRequests = this.pendingRequests.filter(
+      (r) => r.clientId !== socket.clientId,
+    );
+    if (this.pendingRequests.length >= MAX_PENDING_REQUESTS) {
+      socket.emit("errorMessage", "Too many pending requests, try again later.");
+      return;
+    }
+    this.pendingRequests.push({
+      id: newKey().slice(0, 8),
+      clientId: socket.clientId,
+      type: "changeVideo",
+      video,
+      timestamp: new Date().toISOString(),
+    });
+    socket.emit("REC:requestResult", { video, status: "pending" });
+    this.sendRequestsToControllers();
+  };
+
+  private resolveRequest = (socket: Socket, raw: unknown) => {
+    const data = raw as { id?: unknown; approve?: unknown } | null;
+    if (typeof data?.id !== "string" || typeof data.approve !== "boolean") {
+      return;
+    }
+    const request = this.pendingRequests.find((r) => r.id === data.id);
+    if (!request) {
+      return;
+    }
+    this.pendingRequests = this.pendingRequests.filter((r) => r !== request);
+    if (data.approve) {
+      this.startHosting(socket, request.video);
+    }
+    this.socketFor(request.clientId)?.emit("REC:requestResult", {
+      video: request.video,
+      status: data.approve ? "approved" : "rejected",
+    });
+    this.sendRequestsToControllers();
   };
 
   private deleteChatMessages = async (raw: unknown) => {

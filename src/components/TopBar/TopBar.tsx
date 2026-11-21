@@ -43,7 +43,11 @@ export async function createRoom(
       throw new Error(`Server returned status ${response.status}`);
     }
     const data = await response.json();
-    const { name } = data;
+    const { name, hostKey } = data;
+    if (hostKey) {
+      // Secret proving this browser created the room (see server/room.ts verifyRole)
+      window.localStorage.setItem("watchparty-rolekey:" + name, hostKey);
+    }
     if (openNewTab) {
       window.open("/watch" + name);
     } else {
