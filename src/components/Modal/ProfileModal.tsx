@@ -12,7 +12,6 @@ import {
 import firebase from "firebase/compat/app";
 import "firebase/compat/auth";
 import { serverPath } from "../../utils/utils";
-import { ManageSubButton } from "../SubscribeButton/SubscribeButton";
 import config from "../../config";
 import { MetadataContext } from "../../MetadataContext";
 import {
@@ -209,11 +208,6 @@ export class ProfileModal extends React.Component<{
           <p>
             Are you sure you want to delete your account? This can't be undone.
           </p>
-          <p>
-            Note: If you have an active subscription, deleting your account will
-            NOT automatically cancel it and you will need to contact
-            support@watchparty.me to cancel.
-          </p>
           <div style={{ display: "flex", gap: "4px" }}>
             <Button
               onClick={async () => {
@@ -294,7 +288,6 @@ export class ProfileModal extends React.Component<{
                 Change Email
               </Button>
             )}
-          {this.context.isSubscriber && <ManageSubButton />}
           <Button
             disabled={this.state.resetDisabled}
             leftSection={<IconKeyFilled />}

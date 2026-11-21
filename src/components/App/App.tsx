@@ -157,7 +157,6 @@ interface AppState {
   isVBrowserLarge: boolean;
   nonPlayableMedia: boolean;
   currentTab: string;
-  isSubscribeModalOpen: boolean;
   isVBrowserModalOpen: boolean;
   isScreenShareModalOpen: boolean;
   isFileShareModalOpen: boolean;
@@ -233,7 +232,6 @@ export class App extends React.Component<AppProps, AppState> {
     nonPlayableMedia: false,
     currentTab:
       new URLSearchParams(window.location.search).get("tab") ?? "chat",
-    isSubscribeModalOpen: false,
     isVBrowserModalOpen: false,
     isScreenShareModalOpen: false,
     isFileShareModalOpen: false,
@@ -2378,7 +2376,7 @@ export class App extends React.Component<AppProps, AppState> {
                             }
                             data={[
                               {
-                                label: "1080p (Plus only)",
+                                label: "1080p (Large VBrowser only)",
                                 value: "1920x1080@30",
                                 disabled: !this.state.isVBrowserLarge,
                               },

@@ -4,7 +4,6 @@ import { ActionIcon, Avatar, Button, Menu, Text } from "@mantine/core";
 import firebase from "firebase/compat/app";
 import "firebase/compat/auth";
 import { LoginModal } from "../Modal/LoginModal";
-import { SubscribeButton } from "../SubscribeButton/SubscribeButton";
 import { ProfileModal } from "../Modal/ProfileModal";
 import Announce from "../Announce/Announce";
 import { InviteButton } from "../InviteButton/InviteButton";
@@ -240,7 +239,6 @@ export const TopBar = (props: {
   roomTitleColor?: string;
 }) => {
   const context = useContext(MetadataContext);
-  const subscribeButton = <SubscribeButton />;
   return (
     <React.Fragment>
       <div
@@ -363,7 +361,6 @@ export const TopBar = (props: {
 
           {!props.hideNewRoom && <NewRoomButton openNewTab />}
           {!props.hideMyRooms && context.user && <ListRoomsButton />}
-          {subscribeButton}
           {!props.hideSignin && <SignInButton />}
         </div>
       </div>

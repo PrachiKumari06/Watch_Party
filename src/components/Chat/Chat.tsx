@@ -216,16 +216,12 @@ export class Chat extends React.Component<ChatProps> {
       return (
         <React.Fragment>
           The VBrowser shut down automatically.
-          <br />
-          Subscribe for longer sessions.
         </React.Fragment>
       );
     } else if (cmd === "vBrowserAlmostTimeout") {
       return (
         <React.Fragment>
           The VBrowser will shut down soon.
-          <br />
-          Subscribe for longer sessions.
         </React.Fragment>
       );
     }
@@ -447,7 +443,7 @@ const ChatMessage = ({
   className: string;
 }) => {
   const { user } = useContext(MetadataContext);
-  const { id, timestamp, cmd, msg, system, isSub, reactions, videoTS } =
+  const { id, timestamp, cmd, msg, system, reactions, videoTS } =
     message;
   const spellFull = 5; // the number of people whose names should be written out in full in the reaction popup
   const imageMsg = renderImageString(msg);
@@ -491,8 +487,7 @@ const ChatMessage = ({
             trigger={
               <div
                 style={{ cursor: "pointer", fontWeight: 700 }}
-                title={isSub ? "WatchParty Plus subscriber" : ""}
-                className={`${isSub ? styles.subscriber : styles.light} ${styles.hoverEffect}`}
+                                className={`${styles.light} ${styles.hoverEffect}`}
               >
                 {Boolean(system) && "System"}
                 {nameMap[id] || id}

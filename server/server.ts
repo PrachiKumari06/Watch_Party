@@ -8,24 +8,15 @@ import http from "node:http";
 import { Server } from "socket.io";
 import { searchYoutube, youtubePlaylist } from "./utils/youtube.ts";
 import { Room } from "./room.ts";
-import { redis, redisCount } from "./utils/redis.ts";
-import {
-  getCustomerByUid,
-  createSelfServicePortal,
-  getIsSubscriberByUid,
-  recordCheckoutSession,
-  stripe,
-} from "./utils/stripe.ts";
+import { saveSubtitle, getSubtitle } from "./utils/subtitleStore.ts";
 import { deleteUser, validateUserToken } from "./utils/firebase.ts";
 import path from "node:path";
-import { getStartOfDay } from "./utils/time.ts";
 import { getSessionLimitSeconds } from "./vm/utils.ts";
 import { postgres, insertObject, upsertObject } from "./utils/postgres.ts";
 import crypto from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { resolveShard } from "./utils/resolveShard.ts";
 import { makeRoomName, makeUserName } from "./utils/moniker.ts";
-import { getStats } from "./utils/getStats.ts";
 import { assertPublicUrl, safeFetch } from "./utils/ssrf.ts";
 
 // Last-resort safety net: a stray rejected promise shouldn't take down every room on this shard.
@@ -116,8 +107,6 @@ safeInterval("saveRooms", saveRooms, 1000);
 if (process.env.NODE_ENV === "development") {
   try {
     import("./vmWorker.ts");
-    // import('./syncSubs.ts');
-    // import('./timeSeries.ts');
   } catch (e) {
     console.error(e);
   }
@@ -137,13 +126,11 @@ app.get("/subtitle/:hash", async (req, res) => {
     res.status(404).end("not found");
     return;
   }
-  const key = "subtitle:" + req.params.hash;
-  const buf = await redis?.getBuffer(key);
+  const buf = getSubtitle(req.params.hash);
   if (!buf) {
     res.status(404).end("not found");
     return;
   }
-  await redis?.expire(key, 24 * 60 * 60);
   // User-uploaded content served from our origin: make sure it can never be rendered as HTML
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
   res.setHeader("X-Content-Type-Options", "nosniff");
@@ -155,25 +142,20 @@ app.get("/subtitle/:hash", async (req, res) => {
 app.use(compression());
 
 app.post("/subtitle", async (req, res) => {
-  if (!redis) {
-    res.status(503).json({ error: "subtitle storage is not available" });
-    return;
-  }
   const data = req.body;
   // body-parser only produces a Buffer for text/plain bodies
   if (!Buffer.isBuffer(data) || data.length === 0) {
     res.status(400).json({ error: "expected a non-empty text/plain body" });
     return;
   }
-  // calculate hash, gzip and save to redis
+  // calculate hash, gzip and keep in memory
   const hash = crypto
     .createHash("sha256")
     .update(data)
     .digest()
     .toString("hex");
   let gzipData = gzipSync(data);
-  await redis.setex("subtitle:" + hash, 24 * 60 * 60, gzipData);
-  redisCount("subUploads");
+  saveSubtitle(hash, gzipData);
   res.json({ hash });
 });
 
@@ -201,13 +183,7 @@ app.get("/downloadSubtitles", async (req, res) => {
       throw new Error(`OpenSubtitles download failed: ${urlResp.status}`);
     }
     const urlData: { link: string } = await urlResp.json();
-    redisCount("subDownloadsOS");
-    if (!redis) {
-      // Return the direct link to the user, will work for about 3 hours
-      res.json(urlData);
-      return;
-    }
-    // Cache the contents in Redis (longer retention)
+    // Cache the contents in memory (longer retention than the direct link)
     const subResp = await fetch(urlData.link);
     if (!subResp.ok) {
       throw new Error(`Subtitle file fetch failed: ${subResp.status}`);
@@ -219,7 +195,7 @@ app.get("/downloadSubtitles", async (req, res) => {
       .digest()
       .toString("hex");
     let gzipData = gzipSync(data);
-    await redis.setex("subtitle:" + hash, 24 * 60 * 60, gzipData);
+    saveSubtitle(hash, gzipData);
     res.json({ link: "/subtitle/" + hash });
   } catch (e) {
     console.log(e);
@@ -261,16 +237,6 @@ app.get("/searchSubtitles", async (req, res) => {
     result = [];
   }
   res.json(result ?? []);
-  redisCount("subSearchesOS");
-});
-
-app.get("/stats", async (req, res) => {
-  if (req.query.key && req.query.key === config.STATS_KEY) {
-    const stats = await getStats();
-    res.json(stats);
-  } else {
-    res.status(403).json({ error: "Access Denied" });
-  }
 });
 
 app.get("/health/:metric", async (req, res) => {
@@ -282,20 +248,9 @@ app.get("/health/:metric", async (req, res) => {
   res.status(result ? 200 : 500).json(result);
 });
 
-app.get("/timeSeries", async (req, res) => {
-  if (req.query.key && req.query.key === config.STATS_KEY && redis) {
-    const timeSeriesData = await redis.lrange("timeSeries", 0, -1);
-    const timeSeries = timeSeriesData.map((entry) => JSON.parse(entry));
-    res.json(timeSeries);
-  } else {
-    res.status(403).json({ error: "Access Denied" });
-  }
-});
-
 app.get("/youtube", async (req, res) => {
   if (typeof req.query.q === "string") {
     try {
-      redisCount("youtubeSearch");
       const items = await searchYoutube(req.query.q);
       res.json(items);
     } catch {
@@ -374,124 +329,6 @@ app.post("/createRoom", async (req, res) => {
   
 });
 
-app.post("/checkoutSub", async (req, res) => {
-  const decoded = await validateUserToken(
-    String(req.body?.uid),
-    String(req.body?.token),
-  );
-  if (!decoded) {
-    res.status(400).json({ error: "invalid user token" });
-    return;
-  }
-  // Don't let a user subscribe twice
-  if (postgres) {
-    const { rows } = await postgres.query(
-      "SELECT 1 FROM subscriber WHERE uid = $1 AND status = 'active'",
-      [decoded.uid],
-    );
-    if (rows.length) {
-      res.status(400).json({ error: "already subscribed" });
-      return;
-    }
-  }
-  const returnUrl = req.body?.return_url
-  if (!returnUrl) {
-    res.status(400).json({ error: "invalid return_url" });
-    return;
-  }
-  // Stripe redirects to success_url on our server first, so we can record the subscription
-  // before sending the user back to their room
-  const proto = (req.get("x-forwarded-proto") ?? req.protocol)
-    .split(",")[0]
-    .trim();
-  const serverUrl = `${proto === "https" ? "https" : "http"}://${req.get("host")}`;
-  // Reuse the existing customer for this user, or create one tagged with their UID
-  // so we can find it later even if their email changes
-  const customer =
-    (await getCustomerByUid(decoded.uid)) ??
-    (await stripe.customers.create({
-      email: decoded.email,
-      metadata: { firebaseUid: decoded.uid },
-    }));
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    allow_promotion_codes: true,
-    client_reference_id: decoded.uid,
-    customer: customer.id,
-    line_items: [
-      {
-        price:
-          config.NODE_ENV === "development"
-            ? "price_HNGtabCzD5qyfd"
-            : "price_HNDBoPDI7yYRi9",
-        quantity: 1,
-      },
-    ],
-    // {CHECKOUT_SESSION_ID} is filled in by Stripe, so it must not be URL-encoded
-    success_url: `${serverUrl}/subSuccess?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: returnUrl,
-    // /subSuccess redirects here. Stored on the session (not in the success URL) so
-    // the redirect target can't be changed by editing a link.
-    metadata: { return_url: returnUrl },
-  });
-  res.json({ url: session.url });
-});
-
-// Stripe sends the user here after a successful checkout
-app.get("/subSuccess", async (req, res) => {
-  const sessionId =
-    typeof req.query.session_id === "string" ? req.query.session_id : "";
-  let returnUrl: string | undefined = undefined;
-  const result = await recordCheckoutSession(sessionId);
-  returnUrl = result.returnUrl;
-  // Only ever redirect to the URL we validated and stored when creating the session
-  // (never to something from this request's query string). If we couldn't read it, go home.
-  res.redirect(returnUrl || "/");
-});
-
-app.post("/manageSub", async (req, res) => {
-  const decoded = await validateUserToken(
-    String(req.body?.uid),
-    String(req.body?.token),
-  );
-  if (!decoded) {
-    res.status(400).json({ error: "invalid user token" });
-    return;
-  }
-  const customer = await getCustomerByUid(decoded.uid);
-  if (!customer) {
-    res.status(400).json({ error: "customer not found" });
-    return;
-  }
-  const session = await createSelfServicePortal(
-    customer.id,
-    req.body?.return_url,
-  );
-  res.json(session);
-});
-
-app.post("/updateEmail", async (req, res) => {
-  const decoded = await validateUserToken(
-    String(req.body?.uid),
-    String(req.body?.token),
-  );
-  if (!decoded) {
-    res.status(400).json({ error: "invalid user token" });
-    return;
-  }
-  const email =
-    typeof req.body?.email === "string" ? req.body.email.trim() : "";
-  if (!email) {
-    res.status(400).json({ error: "invalid email" });
-    return;
-  }
-  const customer = await getCustomerByUid(decoded.uid);
-  if (customer) {
-    await stripe.customers.update(customer.id, { email });
-  }
-  res.json({});
-});
-
 app.delete("/deleteAccount", async (req, res) => {
   // TODO pass this in req.query instead
   const decoded = await validateUserToken(req.body?.uid, req.body?.token);
@@ -502,13 +339,8 @@ app.delete("/deleteAccount", async (req, res) => {
   if (postgres) {
     // Delete rooms
     await postgres.query("DELETE FROM room WHERE owner = $1", [decoded.uid]);
-    // Delete linked accounts
-    await postgres.query("DELETE FROM link_account WHERE uid = $1", [
-      decoded.uid,
-    ]);
   }
   await deleteUser(decoded.uid);
-  redisCount("deleteAccount");
   res.json({});
 });
 
@@ -517,9 +349,6 @@ app.get("/metadata", async (req, res) => {
     String(req.query?.uid),
     String(req.query?.token),
   );
-  let isSubscriber = await getIsSubscriberByUid(decoded?.uid);
-  // Has the user ever been a subscriber?
-  // const customer = await getCustomerByUid(decoded.uid);
   let isFreePoolFull = false;
   try {
     const resp = await fetch(
@@ -544,7 +373,6 @@ app.get("/metadata", async (req, res) => {
     );
   }
   res.json({
-    isSubscriber,
     isFreePoolFull,
     beta,
     streamPath,
@@ -610,102 +438,6 @@ app.delete("/deleteRoom", async (req, res) => {
   res.json(result?.rows);
 });
 
-app.get("/linkAccount", async (req, res) => {
-  const decoded = await validateUserToken(
-    String(req.query?.uid),
-    String(req.query?.token),
-  );
-  if (!decoded) {
-    res.status(400).json({ error: "invalid user token" });
-    return;
-  }
-  if (!postgres) {
-    res.status(400).json({ error: "invalid database client" });
-    return;
-  }
-  // Get the linked accounts for the user
-  let linkAccounts: LinkAccount[] = [];
-  if (decoded?.uid && postgres) {
-    const { rows } = await postgres.query(
-      "SELECT kind, accountid, accountname, discriminator FROM link_account WHERE uid = $1",
-      [decoded?.uid],
-    );
-    linkAccounts = rows;
-  }
-  res.json(linkAccounts);
-});
-
-app.post("/linkAccount", async (req, res) => {
-  const decoded = await validateUserToken(
-    String(req.body?.uid),
-    String(req.body?.token),
-  );
-  if (!decoded) {
-    res.status(400).json({ error: "invalid user token" });
-    return;
-  }
-  if (!postgres) {
-    res.status(400).json({ error: "invalid database client" });
-    return;
-  }
-  const kind = req.body?.kind;
-  if (kind === "discord") {
-    const tokenType = req.body?.tokenType;
-    const accessToken = req.body.accessToken;
-    // Get the token and verify the user
-    const response = await fetch("https://discord.com/api/users/@me", {
-      headers: {
-        authorization: `${tokenType} ${accessToken}`,
-      },
-    });
-    if (!response.ok) {
-      res.status(400).json({ error: "invalid discord token" });
-      return;
-    }
-    const data = await response.json();
-    const accountid = data.id;
-    const accountname = data.username;
-    const discriminator = data.discriminator;
-    // Store the user id, username, discriminator
-    await upsertObject(
-      postgres,
-      "link_account",
-      {
-        accountid: accountid,
-        accountname: accountname,
-        discriminator: discriminator,
-        uid: decoded.uid,
-        kind: kind,
-      },
-      { uid: true, kind: true },
-    );
-    res.json({});
-  } else {
-    res.status(400).json({ error: "unsupported kind" });
-  }
-});
-
-app.delete("/linkAccount", async (req, res) => {
-  // TODO read from req.query instead
-  const decoded = await validateUserToken(
-    String(req.body?.uid),
-    String(req.body?.token),
-  );
-  if (!decoded) {
-    res.status(400).json({ error: "invalid user token" });
-    return;
-  }
-  if (!postgres) {
-    res.status(400).json({ error: "invalid database client" });
-    return;
-  }
-  await postgres.query(
-    "DELETE FROM link_account WHERE uid = $1 AND kind = $2",
-    [decoded.uid, req.body.kind],
-  );
-  res.json({});
-});
-
 app.get("/generateName", async (req, res) => {
   res.send(makeUserName());
 });
@@ -715,7 +447,6 @@ app.get("/generateName", async (req, res) => {
 const PROXY_HOST_RE =
   /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/i;
 app.get("/proxy/*splat", async (req, res) => {
-  redisCount("proxyReqs");
   try {
     const parsed = new URL("http://localhost" + req.url);
     const pathname = parsed.pathname.slice("/proxy".length);
@@ -857,9 +588,6 @@ async function release() {
             cmd: "vBrowserTimeout",
             msg: "",
           });
-          redisCount("vBrowserTerminateTimeout");
-        } else if (isRoomEmpty) {
-          redisCount("vBrowserTerminateEmpty");
         }
       } else if (isAlmostTimedOut) {
         room.addChatMessage(null, {
@@ -878,61 +606,19 @@ async function release() {
 }
 
 async function minuteMetrics() {
+  // Keep the heartbeat fresh for rooms that are using a vBrowser
   const roomArr = Array.from(rooms.values());
-  let vbWaiting = 0;
   for (let room of roomArr) {
     try {
       if (room.vBrowser && room.vBrowser.id) {
-        // Update the heartbeat
         await postgres?.query(
           `UPDATE vbrowser SET "heartbeatTime" = NOW() WHERE "roomId" = $1 and vmid = $2`,
           [room.roomId, room.vBrowser.id],
         );
-
-        const expireTime = getStartOfDay() / 1000 + 86400;
-        if (room.vBrowser?.creatorClientID) {
-          await redis?.zincrby(
-            "vBrowserClientIDMinutes",
-            1,
-            room.vBrowser.creatorClientID,
-          );
-          await redis?.expireat("vBrowserClientIDMinutes", expireTime);
-        }
-        if (room.vBrowser?.creatorUID) {
-          await redis?.zincrby(
-            "vBrowserUIDMinutes",
-            1,
-            room.vBrowser?.creatorUID,
-          );
-          await redis?.expireat("vBrowserUIDMinutes", expireTime);
-        }
       }
-      const users = room.roster.length;
-      if (users) {
-        await redis?.setex(`roomCounts:${room.roomId}`, 120, users);
-        await redis?.setex(
-          `roomRosters:${room.roomId}`,
-          120,
-          JSON.stringify(room.getRosterForStats()),
-        );
-      }
-      vbWaiting += room.vBrowserQueue ? 1 : 0;
     } catch (e) {
-      // One room's failure shouldn't stop metrics for the rest
+      // One room's failure shouldn't stop the heartbeat for the rest
       console.warn("[minuteMetrics] room %s failed:", room.roomId, e);
     }
   }
-  // Report shard metrics
-  const obj: ShardMetric = {
-    uptime: process.uptime(),
-    mem: process.memoryUsage().rss,
-    roomCount: rooms.size,
-    users: io.engine.clientsCount,
-    vbWaiting,
-  };
-  await redis?.setex(
-    `shardMetrics:${config.SHARD ?? 0}`,
-    120,
-    JSON.stringify(obj),
-  );
 }

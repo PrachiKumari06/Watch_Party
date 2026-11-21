@@ -1,7 +1,5 @@
-import React, { useContext } from "react";
+import React from "react";
 import { Modal, Button, Table } from "@mantine/core";
-import { SubscribeButton } from "../SubscribeButton/SubscribeButton";
-import { MetadataContext } from "../../MetadataContext";
 
 export const ScreenShareModal = ({
   closeModal,
@@ -10,8 +8,6 @@ export const ScreenShareModal = ({
   closeModal: () => void;
   startScreenShare: (useMediaSoup: boolean) => void;
 }) => {
-  const { isSubscriber } = useContext(MetadataContext);
-  const subscribeButton = <SubscribeButton />;
   return (
     <Modal
       opened={true}
@@ -32,8 +28,8 @@ export const ScreenShareModal = ({
         <Table.Thead>
           <Table.Tr>
             <Table.Th />
-            <Table.Th>WatchParty Free</Table.Th>
-            <Table.Th>WatchParty Plus</Table.Th>
+            <Table.Th>Standard</Table.Th>
+            <Table.Th>Relay</Table.Th>
           </Table.Tr>
         </Table.Thead>
 
@@ -76,19 +72,15 @@ export const ScreenShareModal = ({
               </Button>
             </Table.Td>
             <Table.Td>
-              {isSubscriber ? (
-                <Button
-                  color="orange"
-                  onClick={() => {
-                    startScreenShare(true);
-                    closeModal();
-                  }}
-                >
-                  Start Screenshare w/Relay
-                </Button>
-              ) : (
-                subscribeButton
-              )}
+              <Button
+                color="orange"
+                onClick={() => {
+                  startScreenShare(true);
+                  closeModal();
+                }}
+              >
+                Start Screenshare w/Relay
+              </Button>
             </Table.Td>
           </Table.Tr>
         </Table.Tbody>

@@ -34,7 +34,6 @@ interface ChatMessageBase {
   cmd?: string;
   msg?: string;
   system?: boolean;
-  isSub?: boolean;
   replyToId?: string;
   replyToTimestamp?: string;
   replyToUserId?: string;
@@ -87,21 +86,5 @@ interface PersistentRoom {
   owner: string;
   vanity: string;
   isChatDisabled: boolean;
-  isSubRoom: boolean;
   data: any;
-}
-
-interface LinkAccount {
-  accountname: string;
-  accountid: string;
-  discriminator: string;
-  kind: string;
-}
-
-interface ShardMetric {
-  uptime: number;
-  mem: number;
-  roomCount: number;
-  users: number;
-  vbWaiting: number;
 }

@@ -1,6 +1,5 @@
 import React, { useContext, useState } from "react";
 import { Modal, Button, Table, Checkbox } from "@mantine/core";
-import { SubscribeButton } from "../SubscribeButton/SubscribeButton";
 import { MetadataContext } from "../../MetadataContext";
 import { isClientTranscodeSupported } from "../../utils/clientTranscode";
 
@@ -15,7 +14,6 @@ export const FileShareModal = (props: {
   const { closeModal } = props;
   const [convert, setConvert] = useState(false);
   const canConvert = isClientTranscodeSupported();
-  const subscribeButton = <SubscribeButton />;
   return (
     <Modal
       opened
@@ -29,8 +27,8 @@ export const FileShareModal = (props: {
         <Table.Thead>
           <Table.Tr>
             <Table.Th />
-            <Table.Th>WatchParty Free</Table.Th>
-            <Table.Th>WatchParty Plus (Relay)</Table.Th>
+            <Table.Th>Standard</Table.Th>
+            <Table.Th>Relay</Table.Th>
           </Table.Tr>
         </Table.Thead>
 
@@ -73,19 +71,15 @@ export const FileShareModal = (props: {
               </Button>
             </Table.Td>
             <Table.Td>
-              {context.isSubscriber ? (
-                <Button
-                  color="orange"
-                  onClick={() => {
-                    props.startFileShare(true, { convert });
-                    props.closeModal();
-                  }}
-                >
-                  Start Fileshare w/Relay
-                </Button>
-              ) : (
-                subscribeButton
-              )}
+              <Button
+                color="orange"
+                onClick={() => {
+                  props.startFileShare(true, { convert });
+                  props.closeModal();
+                }}
+              >
+                Start Fileshare w/Relay
+              </Button>
             </Table.Td>
           </Table.Tr>
         </Table.Tbody>

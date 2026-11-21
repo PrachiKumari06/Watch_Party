@@ -38,8 +38,6 @@ const theme = createTheme({
   white: softWhite,
 });
 
-const Debug = lazy(() => import("./components/Debug/Debug"));
-
 const firebaseConfig = config.VITE_FIREBASE_CONFIG;
 
 if (firebaseConfig && !firebase.apps.length) {
@@ -66,16 +64,10 @@ class WatchParty extends React.Component {
           );
           const data = await response.json();
           this.setState({
-            isSubscriber: data.isSubscriber,
             streamPath: data.streamPath,
             beta: data.beta,
           });
         }
-      });
-    } else {
-      // Firebase isn't set up so enable subscriber features
-      this.setState({
-        isSubscriber: true,
       });
     }
   }
@@ -132,13 +124,6 @@ class WatchParty extends React.Component {
             <Route path="/faq">
               <TopBar />
               <FAQ />
-              <Footer />
-            </Route>
-            <Route path="/debug">
-              <TopBar />
-              <Suspense fallback={null}>
-                <Debug />
-              </Suspense>
               <Footer />
             </Route>
           </BrowserRouter>

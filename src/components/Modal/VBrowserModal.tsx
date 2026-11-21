@@ -2,7 +2,6 @@ import React from "react";
 import { Modal, Button, Table, Alert, Select, Avatar } from "@mantine/core";
 import { SignInButton } from "../TopBar/TopBar";
 import { serverPath } from "../../utils/utils";
-import { SubscribeButton } from "../SubscribeButton/SubscribeButton";
 import config from "../../config";
 import { MetadataContext } from "../../MetadataContext";
 import { IconHourglass } from "@tabler/icons-react";
@@ -59,7 +58,7 @@ export class VBrowserModal extends React.Component<{
             closeModal();
           }}
         >
-          {large ? "Launch VBrowser+" : "Continue with Free"}
+          {large ? "Launch Large VBrowser" : "Launch VBrowser"}
         </Button>
       );
     };
@@ -68,19 +67,16 @@ export class VBrowserModal extends React.Component<{
         style={{ maxWidth: "300px" }}
         color="red"
         icon={<IconHourglass />}
-        title="No Free VBrowsers Available"
+        title="No VBrowsers Available"
       >
         <div>
-          <div>All of the free VBrowsers are currently being used.</div>
+          <div>All of the VBrowsers are currently being used.</div>
           <div>
-            Please consider subscribing for anytime access to faster VBrowsers,
-            or try again later.
+            Please try again later.
           </div>
         </div>
       </Alert>
     );
-
-    const subscribeButton = <SubscribeButton />;
 
     const canLaunch = this.context.user || !config.VITE_FIREBASE_CONFIG;
     return (
@@ -98,8 +94,8 @@ export class VBrowserModal extends React.Component<{
           <Table.Thead>
             <Table.Tr>
               <Table.Th />
-              <Table.Th>WatchParty Free</Table.Th>
-              <Table.Th>WatchParty Plus</Table.Th>
+              <Table.Th>Standard</Table.Th>
+              <Table.Th>Large</Table.Th>
             </Table.Tr>
           </Table.Thead>
 
@@ -162,11 +158,7 @@ export class VBrowserModal extends React.Component<{
                 )}
               </Table.Td>
               <Table.Td>
-                {this.context.isSubscriber ? (
-                  <LaunchButton large />
-                ) : (
-                  subscribeButton
-                )}
+                <LaunchButton large />
               </Table.Td>
             </Table.Tr>
           </Table.Tbody>

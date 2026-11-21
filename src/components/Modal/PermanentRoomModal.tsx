@@ -8,7 +8,6 @@ export const PermanentRoomModal = (props: { closeModal: () => void }) => {
     <Modal opened onClose={closeModal} title="Permanent Rooms">
       <div>
         Registered users have the ability to make their rooms permanent.
-        Subscribed users can create multiple permanent rooms.
       </div>
       <Table striped>
         <Table.Thead>
@@ -47,14 +46,14 @@ export const PermanentRoomModal = (props: { closeModal: () => void }) => {
             </Table.Td>
           </Table.Tr>
           <Table.Tr>
-            <Table.Td>Custom Room URLs (subscribers)</Table.Td>
+            <Table.Td>Custom Room URLs</Table.Td>
             <Table.Td></Table.Td>
             <Table.Td>
               <IconCheck />
             </Table.Td>
           </Table.Tr>
           {/* <Table.Tr>
-                  <Table.Td>Max Room Capacity (subscribers)</Table.Td>
+                  <Table.Td>Max Room Capacity</Table.Td>
                     <Table.Td>20</Table.Td>
                     <Table.Td>100</Table.Td>
                   </Table.Tr> */}

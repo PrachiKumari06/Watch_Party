@@ -1,5 +1,4 @@
 import config from "../config.ts";
-import { redis, redisCount } from "../utils/redis.ts";
 import { postgres as pg } from "../utils/postgres.ts";
 import type { PoolConfig, PoolRegion } from "./utils.ts";
 import type { Client } from "pg";
@@ -185,7 +184,6 @@ export abstract class VMManager {
       // Check if VM needs to be reimaged
       if (this.imageId !== vmImageId) {
         await this.reimageVM(vmid);
-        redisCount("vBrowserReimage");
         // Update the vmImageId
         await postgres.query(
           `UPDATE vbrowser SET image = $3 WHERE pool = $1 AND vmid = $2`,
@@ -226,7 +224,6 @@ export abstract class VMManager {
     VALUES($1, $2, NOW(), 'staging', $3)`,
       [this.getPoolName(), id, this.imageId],
     );
-    redisCount("vBrowserLaunches");
     return id;
   };
 
@@ -377,7 +374,6 @@ export abstract class VMManager {
       );
       for (let server of allVMs) {
         if (!inUse.has(server.id)) {
-          redisCount("vBrowserCleanup");
           console.log("[CLEANUP]", this.getPoolName(), server.id);
           try {
             await this.resetVM(server.id);
@@ -463,9 +459,6 @@ export abstract class VMManager {
         }
         if (retryCount % 180 === 0) {
           console.log("[CHECKSTAGING]", this.getPoolName(), "giving up:", vmid);
-          redisCount("vBrowserStagingFails");
-          await redis?.lpush("vBrowserStageFails", vmid);
-          await redis?.ltrim("vBrowserStageFails", 0, 19);
           // VM didn't come up. set image to null so we reimage
           await postgres.query(
             `UPDATE vbrowser SET image = NULL WHERE pool = $1 AND vmid = $2`,
@@ -514,8 +507,6 @@ export abstract class VMManager {
             [rowid, pass],
           );
           // console.log(rows);
-          await redis?.lpush("vBrowserStageRetries", retryCount);
-          await redis?.ltrim("vBrowserStageRetries", 0, 19);
         }
         return [vmid, retryCount, ready].join(",");
       });

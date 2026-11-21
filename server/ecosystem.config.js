@@ -54,28 +54,12 @@ export const apps = [
       DO_SSH_KEYS: "cc:3d:a7:d3:99:17:fe:b7:dd:59:c4:78:14:d4:02:d1",
     },
   },
-  {
-    name: "syncSubs",
-    script: "./server/syncSubs.ts",
-    log_date_format: "YYYY-MM-DD HH:mm:ss Z",
-    interpreter: "node",
-  },
-  {
-    name: "timeSeries",
-    script: "./server/timeSeries.ts",
-    log_date_format: "YYYY-MM-DD HH:mm:ss Z",
-    interpreter: "node",
-  },
+  
   {
     name: "cleanup",
     script: "./server/cleanup.ts",
     log_date_format: "YYYY-MM-DD HH:mm:ss Z",
     interpreter: "node",
   },
-  {
-    name: "discordBot",
-    script: "./server/discordBot.ts",
-    log_date_format: "YYYY-MM-DD HH:mm:ss Z",
-    interpreter: "node",
-  },
+ 
 ];

@@ -1,7 +1,6 @@
 import config from "../config.ts";
 import { VMManager, type VM } from "./base.ts";
 import fs from "node:fs";
-import { redis } from "../utils/redis.ts";
 
 const HETZNER_TOKEN = config.HETZNER_TOKEN;
 const sshKeys = config.HETZNER_SSH_KEYS.split(",").map(Number);
@@ -152,9 +151,6 @@ export class Hetzner extends VMManager {
     }
     const remaining = response.headers.get("ratelimit-remaining");
     console.log("[GETVM] %s: %s rate limit remaining", id, remaining);
-    if (remaining) {
-      await redis?.set("hetznerApiRemaining", remaining);
-    }
     const data = await response.json();
     const server = this.mapServerObject(data.server);
     return server;

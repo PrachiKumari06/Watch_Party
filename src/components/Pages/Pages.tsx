@@ -23,10 +23,9 @@ Rooms
 Personal Information
 ----
 - You are not required to register to use the service (except for VBrowser requests), but you have the option to sign in with an email or authentication provider, which will be used to display your name and picture in the rooms you join.
-- If you provide this information, we may use it to contact you regarding your use of the service, or to link your account to a subscription.
+- If you provide this information, we may use it to contact you regarding your use of the service.
 - We do not sell personal information to third parties.
 - You can delete your account and user data associated with it at any time via the Delete Account button. This will permanently delete any rooms and linked services for that account.
-- Payment information is handled by Stripe. We do not collect or access financial information directly.
 
 Cookies
 ----
@@ -59,11 +58,6 @@ By using this service you agree to the following terms:
 - The service provides no guarantee of uptime or availability
 - You use the service at your own risk of encountering objectionable content, as we do not actively moderate rooms unless content is found to be illegal or infringing
 
-Subscriptions
-----
-- If you are dissatisfied with the service for any reason or believe you have been charged in error, please contact support@watchparty.me.
-- We will provide a full refund of the most recent payment, no questions asked.
-
 YouTube
 ----
 The service provides the ability to search and play YouTube videos. By using the YouTube search you agree to the [YouTube Terms of Service](https://www.youtube.com/t/terms).
@@ -87,11 +81,7 @@ A virtual browser (VBrowser) is a browser running in the cloud that a room's mem
 Why did my VBrowser session stop?
 ----
 VBrowsers will terminate automatically if no one is in the room for a while.
-VBrowser sessions are also limited to a maximum of 3 hours for free users, and 24 hours for subscribers.
-
-Does everyone in the room need to be a subscriber to get the benefits?
-----
-No, only the person who created the VBrowser, room, or is sharing the content needs to be.
+VBrowser sessions are also limited to a maximum of 3 hours (24 hours for large VBrowsers).
 
 How do I access sites that have a "not available" message in the VBrowser?
 ----
