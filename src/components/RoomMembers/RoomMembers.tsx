@@ -38,13 +38,13 @@ export const RoomMembers = ({
   const name = (id: string) => nameMap[id] || id;
 
   return (
-    <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+    <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 8,color: "var(--mantine-color-orange-6)" }}>
       {participants.map((p) => {
         const role = p.role ?? "participant";
         const manageable = isHost && p.id !== myId;
         const label = (
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <span style={{ fontWeight: 600 }}>
+            <span style={{ fontWeight: 600 ,color: "var(--mantine-color-orange-6)"}}>
               {name(p.id)}
               {p.id === myId ? " (you)" : ""}
             </span>
@@ -110,7 +110,7 @@ export const RoomMembers = ({
 
       {canControl && requests.length > 0 && (
         <div>
-          <div style={{ fontWeight: 700, marginBottom: 4 }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 ,color: "var(--mantine-color-blue-6)"}}>
             Pending requests
           </div>
           {requests.map((r) => (
@@ -118,7 +118,7 @@ export const RoomMembers = ({
               key={r.id}
               style={{ display: "flex", gap: 6, alignItems: "center" }}
             >
-              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
+              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" ,color: "var(--mantine-color-blue-6)"}}>
                 {name(r.clientId)}: {r.video}
               </span>
               <Button
